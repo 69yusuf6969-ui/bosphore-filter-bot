@@ -31,12 +31,12 @@ def search_all_pdfs_in_drive(file_name_keyword):
         print(f"Drive Arama Hatası: {e}")
         return []
 
-def send_whatsapp_message(remote_jid, instance_name, text, push_name=None):
-    """Evolution API üzerinden WhatsApp'a mesaj gönderir, varsa profil ismini ekler."""
-    send_url = f"{EVO_URL}/message/sendText/{instance_name}"
+def send_whatsapp_message(remote_jid, text, push_name=None):
+    """Evolution API üzerinden WhatsApp'a mesaj gönderir."""
+    # BURASI DÜZELTİLDİ: Artık doğrudan senin paneldeki "bosphore_ana_bot" ismini kullanıyor.
+    send_url = f"{EVO_URL}/message/sendText/bosphore_ana_bot"
     headers = {"apikey": EVO_API_KEY, "Content-Type": "application/json"}
     
-    # Eğer gruptaysak ve profil ismi geldiyse mesajın başına ekle
     final_text = text
     if push_name and "@g.us" in remote_jid:
         final_text = f"✍️ *{push_name}*, {text}"
@@ -69,9 +69,8 @@ def webhook():
         if data and 'data' in data and 'message' in data['data']:
             msg_data = data['data']['message']
             remote_jid = data['data']['key']['remoteJid']
-            instance_name = data['instance']
             
-            # WhatsApp Profil İsmini Yakala (Yoksa 'Kullanıcı' yaz)
+            # WhatsApp Profil İsmini Yakala
             push_name = data['data'].get('pushName', 'Kullanıcı')
             
             message_text = ""
@@ -95,17 +94,16 @@ def webhook():
                 found_files = search_all_pdfs_in_drive(search_keyword)
                 
                 if not found_files:
-                    send_whatsapp_message(remote_jid, instance_name, f"aradığınız '{search_keyword}' kılavuzu maalesef klasörde bulunamadı. ❌", push_name)
+                    send_whatsapp_message(remote_jid, f"aradığınız '{search_keyword}' kılavuzu maalesef klasörde bulunamadı. ❌", push_name)
                     return jsonify({"status": "success"}), 200
                 
                 if len(found_files) == 1:
                     file_name = found_files[0]['name']
                     file_link = found_files[0]['webViewLink']
                     reply = f"istediğiniz *{file_name}* kılavuzu bulundu! ✅\n\n🔗 Doküman Linki:\n{file_link}"
-                    send_whatsapp_message(remote_jid, instance_name, reply, push_name)
+                    send_whatsapp_message(remote_jid, reply, push_name)
                     PENDING_SEARCHES.pop(remote_jid, None)
                 else:
-                    # Çoklu seçimde ismi de hafızaya kaydet
                     PENDING_SEARCHES[remote_jid] = {
                         "files": found_files,
                         "name": push_name
@@ -113,7 +111,7 @@ def webhook():
                     reply_text = f"🔍 *Birden fazla sonuç buldum!*\nLütfen istediğiniz kılavuzun numarasını yazın (Örn: *1* veya *2*):\n\n"
                     for index, file in enumerate(found_files, start=1):
                         reply_text += f"*{index}* - {file['name']}\n"
-                    send_whatsapp_message(remote_jid, instance_name, reply_text, push_name)
+                    send_whatsapp_message(remote_jid, reply_text, push_name)
             
             # --- DURUM 2: SAYI SEÇİMİ ---
             elif remote_jid in PENDING_SEARCHES and message_text.isdigit():
@@ -128,10 +126,10 @@ def webhook():
                     file_link = chosen_file['webViewLink']
                     
                     reply = f"seçtiğiniz *{file_name}* kılavuzu hazır. 📄\n\n🔗 Doküman Linki:\n{file_link}"
-                    send_whatsapp_message(remote_jid, instance_name, reply, original_name)
+                    send_whatsapp_message(remote_jid, reply, original_name)
                     del PENDING_SEARCHES[remote_jid]
                 else:
-                    send_whatsapp_message(remote_jid, instance_name, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.", original_name)
+                    send_whatsapp_message(remote_jid, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.", original_name)
                     
     except Exception as e:
         print(f"🤖 Webhook işlem hatası: {e}")
