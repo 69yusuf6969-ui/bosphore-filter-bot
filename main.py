@@ -31,19 +31,14 @@ def search_all_pdfs_in_drive(file_name_keyword):
         print(f"Drive Arama Hatası: {e}")
         return []
 
-def send_whatsapp_message(remote_jid, text, push_name=None):
-    """Evolution API üzerinden WhatsApp'a mesaj gönderir."""
-    # BURASI DÜZELTİLDİ: Artık doğrudan senin paneldeki "bosphore_ana_bot" ismini kullanıyor.
+def send_whatsapp_message(remote_jid, text):
+    """Evolution API üzerinden WhatsApp'a doğrudan mesaj gönderir (İsim Hitabı Kaldırıldı)."""
     send_url = f"{EVO_URL}/message/sendText/bosphore_ana_bot"
     headers = {"apikey": EVO_API_KEY, "Content-Type": "application/json"}
     
-    final_text = text
-    if push_name and "@g.us" in remote_jid:
-        final_text = f"✍️ *{push_name}*, {text}"
-        
     payload = {
         "number": remote_jid,
-        "text": final_text,
+        "text": text,
         "delay": 1200,
         "linkPreview": True
     }
@@ -70,9 +65,6 @@ def webhook():
             msg_data = data['data']['message']
             remote_jid = data['data']['key']['remoteJid']
             
-            # WhatsApp Profil İsmini Yakala
-            push_name = data['data'].get('pushName', 'Kullanıcı')
-            
             message_text = ""
             if 'conversation' in msg_data:
                 message_text = msg_data['conversation']
@@ -89,47 +81,45 @@ def webhook():
                 if not search_keyword:
                     return jsonify({"status": "success"}), 200
                     
-                print(f"🔍 İsimli Arama Kelimesi: {search_keyword} ({push_name})")
+                print(f"🔍 Arama Kelimesi: {search_keyword}")
                 
                 found_files = search_all_pdfs_in_drive(search_keyword)
                 
                 if not found_files:
-                    send_whatsapp_message(remote_jid, f"aradığınız '{search_keyword}' kılavuzu maalesef klasörde bulunamadı. ❌", push_name)
+                    send_whatsapp_message(remote_jid, f"Aradığınız '{search_keyword}' kılavuzu maalesef klasörde bulunamadı. ❌")
                     return jsonify({"status": "success"}), 200
                 
                 if len(found_files) == 1:
                     file_name = found_files[0]['name']
                     file_link = found_files[0]['webViewLink']
-                    reply = f"istediğiniz *{file_name}* kılavuzu bulundu! ✅\n\n🔗 Doküman Linki:\n{file_link}"
-                    send_whatsapp_message(remote_jid, reply, push_name)
+                    reply = f"İstediğiniz *{file_name}* kılavuzu bulundu! ✅\n\n🔗 Doküman Linki:\n{file_link}"
+                    send_whatsapp_message(remote_jid, reply)
                     PENDING_SEARCHES.pop(remote_jid, None)
                 else:
                     PENDING_SEARCHES[remote_jid] = {
-                        "files": found_files,
-                        "name": push_name
+                        "files": found_files
                     }
                     reply_text = f"🔍 *Birden fazla sonuç buldum!*\nLütfen istediğiniz kılavuzun numarasını yazın (Örn: *1* veya *2*):\n\n"
                     for index, file in enumerate(found_files, start=1):
                         reply_text += f"*{index}* - {file['name']}\n"
-                    send_whatsapp_message(remote_jid, reply_text, push_name)
+                    send_whatsapp_message(remote_jid, reply_text)
             
             # --- DURUM 2: SAYI SEÇİMİ ---
             elif remote_jid in PENDING_SEARCHES and message_text.isdigit():
                 selected_index = int(message_text) - 1
                 saved_data = PENDING_SEARCHES[remote_jid]
                 user_files = saved_data["files"]
-                original_name = saved_data["name"]
                 
                 if 0 <= selected_index < len(user_files):
                     chosen_file = user_files[selected_index]
                     file_name = chosen_file['name']
                     file_link = chosen_file['webViewLink']
                     
-                    reply = f"seçtiğiniz *{file_name}* kılavuzu hazır. 📄\n\n🔗 Doküman Linki:\n{file_link}"
-                    send_whatsapp_message(remote_jid, reply, original_name)
+                    reply = f"Seçtiğiniz *{file_name}* kılavuzu hazır. 📄\n\n🔗 Doküman Linki:\n{file_link}"
+                    send_whatsapp_message(remote_jid, reply)
                     del PENDING_SEARCHES[remote_jid]
                 else:
-                    send_whatsapp_message(remote_jid, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.", original_name)
+                    send_whatsapp_message(remote_jid, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.")
                     
     except Exception as e:
         print(f"🤖 Webhook işlem hatası: {e}")
