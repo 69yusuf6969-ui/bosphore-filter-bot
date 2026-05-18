@@ -1,78 +1,97 @@
-from flask import Flask, request, jsonify
-import requests
 import os
+import requests
+from flask import Flask, request, jsonify
+from googleapiclient.discovery import build
 
 app = Flask(__name__)
 
-# Render çevre değişkenleri
-EVO_URL = os.getenv("EVO_URL", "https://evolution-api-awf2.onrender.com")
-API_KEY = os.getenv("API_KEY", "Bosphore2026!")
-INSTANCE_NAME = os.getenv("INSTANCE_NAME", "bosphore_ana_bot")
+# --- EVOLUTION API AYARLARI ---
+EVO_URL = "https://evolution-api-awf2.onrender.com"
+EVO_API_KEY = "Bosphore2026!"
 
-# 🎯 SADECE TEST ADLARI VE GOOGLE DRIVE LİNKLERİ
-# Link kısımlarını kendi Drive paylaşım linklerinizle değiştirebilirsiniz.
-test_kilavuzlari = {
-    "hbv": "📌 HBV Kılavuzu PDF dosyasına aşağıdaki linkten ulaşabilirsiniz:\n🔗 https://drive.google.com/file/d/SİZİN_HBV_DRIVE_LİNKİNİZ/view?usp=sharing",
-    "hcv": "📌 HCV Kılavuzu PDF dosyasına aşağıdaki linkten ulaşabilirsiniz:\n🔗 https://drive.google.com/file/d/SİZİN_HCV_DRIVE_LİNKİNİZ/view?usp=sharing",
-    "hpv": "📌 HPV Kılavuzu PDF dosyasına aşağıdaki linkten ulaşabilirsiniz:\n🔗 https://drive.google.com/file/d/SİZİN_HPV_DRIVE_LİNKİNİZ/view?usp=sharing"
-}
+# --- GOOGLE DRIVE AYARLARI ---
+DRIVE_API_KEY = "AIzaSyB2TachWmeBOvuGYUin6V5IVgxqXyWuv8A"
+DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
+
+def search_pdf_in_drive(file_name_keyword):
+    """Google Drive klasöründe isme göre PDF arar ve linkini döner."""
+    try:
+        drive_service = build('drive', 'v3', developerKey=DRIVE_API_KEY)
+        
+        # Klasör içinde, isminde keyword geçen, silinmemiş PDF'leri ara
+        query = f"'{DRIVE_FOLDER_ID}' in parents and name contains '{file_name_keyword}' and mimeType = 'application/pdf' and trashed = false"
+        
+        results = drive_service.files().list(
+            q=query, 
+            spaces='drive', 
+            fields='files(id, name, webViewLink)'
+        ).execute()
+        
+        items = results.get('files', [])
+        
+        if not items:
+            return None
+        
+        # İlk bulunan dosyanın adını ve önizleme linkini döndür
+        return items[0]
+    except Exception as e:
+        print(f"Drive Arama Hatası: {e}")
+        return None
 
 @app.route('/webhook', methods=['POST'])
-def whatsapp_webhook():
+def webhook():
     data = request.get_json()
-    if not data:
-        return jsonify({"status": "error", "message": "No data received"}), 400
     
     try:
-        message_data = data.get('data', {})
-        message_type = message_data.get('messageType')
-        from_me = message_data.get('key', {}).get('fromMe', False)
-        remote_jid = message_data.get('key', {}).get('remoteJid', '')
-
-        # Bizim gönderdiğimiz mesajları veya boş verileri pas geç
-        if from_me or not remote_jid:
-            return jsonify({"status": "ignored"}), 200
-
-        # Metni ayıkla
-        message_text = ""
-        if message_type == "conversation":
-            message_text = message_data.get('message', {}).get('conversation', '')
-        elif message_type == "extendedTextMessage":
-            message_text = message_data.get('message', {}).get('extendedTextMessage', {}).get('text', '')
-
-        # Küçük harfe çevir ve boşlukları temizle
-        cleaned_text = message_text.strip().lower()
-
-        # 🎯 SADECE "kılavuz " ile başlıyorsa kontrol et
-        if cleaned_text.startswith("kılavuz"):
-            # "kılavuz hbv" -> "hbv" kısmını yalnız bırakıyoruz
-            test_adi = cleaned_text.replace("kılavuz", "").strip()
+        # Gelen verinin bir mesaj olup olmadığını kontrol et
+        if data and 'data' in data and 'message' in data['data']:
+            msg_data = data['data']['message']
             
-            # Yazılan test adı listemizde var mı?
-            if test_adi in test_kilavuzlari:
-                cevap = test_kilavuzlari[test_adi]
+            # Mesajın metin içeriğini al
+            message_text = ""
+            if 'conversation' in msg_data:
+                message_text = msg_data['conversation']
+            elif 'extendedTextMessage' in msg_data and 'text' in msg_data['extendedTextMessage']:
+                message_text = msg_data['extendedTextMessage']['text']
                 
-                # WhatsApp'a Drive linkini içeren mesajı gönder
-                send_url = f"{EVO_URL}/message/sendText/{INSTANCE_NAME}"
-                headers = {"apikey": API_KEY, "Content-Type": "application/json"}
+            message_text = message_text.strip().lower()
+            
+            # Eğer mesaj "kılavuz " ile başlıyorsa
+            if message_text.startswith("kılavuz "):
+                search_keyword = message_text.replace("kılavuz ", "").strip()
+                
+                remote_jid = data['data']['key']['remoteJid']
+                instance_name = data['instance']
+                
+                print(f"🔍 Klasörde Aranıyor: {search_keyword}")
+                
+                # Google Drive klasöründe ara
+                found_file = search_pdf_in_drive(search_keyword)
+                
+                if found_file:
+                    file_name = found_file['name']
+                    file_link = found_file['webViewLink']
+                    reply_text = f"📄 *{file_name}* bulundu!\n\n🔗 Doküman Linki:\n{file_link}"
+                else:
+                    reply_text = f"❌ Maalesef klasörde içinde '{search_keyword}' geçen bir kılavuz PDF'i bulunamadı."
+                
+                # Evolution API üzerinden WhatsApp'a cevap gönder
+                send_url = f"{EVO_URL}/message/sendText/{instance_name}"
+                headers = {"apikey": EVO_API_KEY, "Content-Type": "application/json"}
                 payload = {
-                    "number": remote_jid.split("@")[0],
-                    "text": cevap
+                    "number": remote_jid,
+                    "text": reply_text,
+                    "delay": 1200,
+                    "linkPreview": True
                 }
-                requests.post(send_url, json=payload, headers=headers)
-                print(f"✅ Kılavuz Gönderildi: {test_adi}")
-            else:
-                # Test adı eşleşmediyse bot sessiz kalır, hiçbir şey göndermez
-                print(f"❓ Bilinmeyen test adı, cevap verilmedi: {test_adi}")
-        else:
-            # "kılavuz" ile başlamayan hiçbir mesaja dönüp bakmaz
-            print(f"😴 Normal mesaj pas geçildi: {cleaned_text}")
-
+                
+                response = requests.post(send_url, json=payload, headers=headers)
+                print(f"📨 Mesaj Gönderme Durumu: {response.status_code}")
+                
     except Exception as e:
-        print("Hata oluştu:", str(e))
-
-    return jsonify({"status": "SUCCESS"}), 200
+        print(f"🤖 Webhook işlem hatası: {e}")
+        
+    return jsonify({"status": "success"}), 200
 
 if __name__ == '__main__':
-    port = int(os.getenv("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=5000)
