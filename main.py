@@ -13,42 +13,55 @@ EVO_API_KEY = "Bosphore2026!"
 DRIVE_API_KEY = "AIzaSyB2TachWmeBOvuGYUin6V5IVgxqXyWuv8A"
 DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
-# Kullanıcıların bekleyen arama sonuçlarını hafızada tutmak için geçici bir sözlük
-# Format: { "kullanıcı_whatsapp_id": [ {"name": "...", "webViewLink": "..."}, ... ] }
 PENDING_SEARCHES = {}
 
 def search_all_pdfs_in_drive(file_name_keyword):
     """Google Drive klasöründe isminde keyword geçen TÜM PDF'leri listeler."""
     try:
         drive_service = build('drive', 'v3', developerKey=DRIVE_API_KEY)
-        
-        # Klasör içinde, isminde keyword geçen, silinmemiş tüm PDF'leri ara
         query = f"'{DRIVE_FOLDER_ID}' in parents and name contains '{file_name_keyword}' and mimeType = 'application/pdf' and trashed = false"
-        
         results = drive_service.files().list(
             q=query, 
             spaces='drive', 
             fields='files(id, name, webViewLink)',
-            pageSize=10  # En fazla 10 sonuç listelesin
+            pageSize=10
         ).execute()
-        
         return results.get('files', [])
     except Exception as e:
         print(f"Drive Arama Hatası: {e}")
         return []
 
-def send_whatsapp_message(remote_jid, instance_name, text):
-    """Evolution API üzerinden WhatsApp'a mesaj gönderir."""
+def send_whatsapp_message(remote_jid, instance_name, text, participant_jid=None):
+    """Evolution API üzerinden WhatsApp'a kişiyi etiketleyerek mesaj gönderir."""
     send_url = f"{EVO_URL}/message/sendText/{instance_name}"
     headers = {"apikey": EVO_API_KEY, "Content-Type": "application/json"}
+    
     payload = {
         "number": remote_jid,
         "text": text,
         "delay": 1200,
         "linkPreview": True
     }
+    
+    # Eğer mesajı gönderen kişinin JID'si varsa ve grup sohbetiyse etiket ekle
+    if participant_jid and "@g.us" in remote_jid:
+        # participant_jid genellikle "905xxxxxxxxx@s.whatsapp.net" formatındadır, sadece numarayı ayıkla
+        pure_number = participant_jid.split("@")[0]
+        payload["text"] = f"@{pure_number} {text}"
+        payload["mentioned"] = [participant_jid]
+        
     response = requests.post(send_url, json=payload, headers=headers)
     print(f"📨 Mesaj Gönderme Durumu: {response.status_code}")
+
+def clean_search_keyword(text):
+    """Kullanıcının mesajındaki gereksiz arama kelimelerini temizler."""
+    keyword = text.replace("kılavuz", "").strip()
+    stop_words = ["var mı", "varmı", "bul", "getir", "ara", "lazım", "arıyorum", "nerede", "nerde", "lütfen", "pdf", "pdfi"]
+    for word in stop_words:
+        if keyword.endswith(word):
+            keyword = keyword[:keyword.rfind(word)].strip()
+        keyword = keyword.replace(word, "").strip()
+    return keyword.strip()
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -60,7 +73,9 @@ def webhook():
             remote_jid = data['data']['key']['remoteJid']
             instance_name = data['instance']
             
-            # Mesaj metnini temizle
+            # Mesajı gönderen gerçek kişiyi bul (Grupta 'participant', özelde direkt 'remoteJid')
+            participant_jid = data['data'].get('participant', remote_jid)
+            
             message_text = ""
             if 'conversation' in msg_data:
                 message_text = msg_data['conversation']
@@ -70,58 +85,55 @@ def webhook():
             message_text = message_text.strip()
             message_text_lower = message_text.lower()
             
-            # --- DURUM 1: YENİ ARAMA BAŞLATMA (kılavuz hcv vb.) ---
-            if message_text_lower.startswith("kılavuz "):
-                search_keyword = message_text_lower.replace("kılavuz ", "").strip()
-                print(f"🔍 Çoklu Arama Başlatıldı: {search_keyword}")
+            # --- DURUM 1: ARAMA TETİKLENME ---
+            if message_text_lower.startswith("kılavuz"):
+                search_keyword = clean_search_keyword(message_text_lower)
                 
-                # Drive'dan eşleşen tüm dosyaları getir
+                if not search_keyword:
+                    return jsonify({"status": "success"}), 200
+                    
+                print(f"🔍 Etiketli Arama Kelimesi: {search_keyword}")
+                
                 found_files = search_all_pdfs_in_drive(search_keyword)
                 
                 if not found_files:
-                    send_whatsapp_message(remote_jid, instance_name, f"❌ Maalesef klasörde içinde '{search_keyword}' geçen hiçbir kılavuz PDF'i bulunamadı.")
+                    send_whatsapp_message(remote_jid, instance_name, f"❌ Maalesef klasörde içinde '{search_keyword}' geçen hiçbir kılavuz PDF'i bulunamadı.", participant_jid)
                     return jsonify({"status": "success"}), 200
                 
-                # Sadece 1 tane dosya bulunduysa direkt gönder, seçtirip uğraştırma
                 if len(found_files) == 1:
                     file_name = found_files[0]['name']
                     file_link = found_files[0]['webViewLink']
-                    reply = f"📄 *{file_name}* bulundu!\n\n🔗 Doküman Linki:\n{file_link}"
-                    send_whatsapp_message(remote_jid, instance_name, reply)
-                    
-                    # Eğer bu kullanıcının eski bir seçimi kaldıysa temizle
+                    reply = f"istediğiniz *{file_name}* kılavuzu bulundu!\n\n🔗 Doküman Linki:\n{file_link}"
+                    send_whatsapp_message(remote_jid, instance_name, reply, participant_jid)
                     PENDING_SEARCHES.pop(remote_jid, None)
-                    
-                # Birden fazla dosya bulunduysa listele ve hafızaya al
                 else:
-                    PENDING_SEARCHES[remote_jid] = found_files
-                    
-                    reply_text = f"🔍 *Birden fazla sonuç bulundu!*\n"
-                    reply_text += f"Lütfen istediğiniz kılavuzun numarasını yazın (Örn: *1* veya *2*):\n\n"
-                    
+                    # Çoklu sonuçlarda kullanıcının jid'sini de hafızaya kaydet ki numara seçince doğru kişiyi etiketleyelim
+                    PENDING_SEARCHES[remote_jid] = {
+                        "files": found_files,
+                        "user": participant_jid
+                    }
+                    reply_text = f"🔍 *Birden fazla sonuç bulundu!*\nLütfen istediğiniz kılavuzun numarasını yazın (Örn: *1* veya *2*):\n\n"
                     for index, file in enumerate(found_files, start=1):
                         reply_text += f"*{index}* - {file['name']}\n"
-                        
-                    send_whatsapp_message(remote_jid, instance_name, reply_text)
+                    send_whatsapp_message(remote_jid, instance_name, reply_text, participant_jid)
             
-            # --- DURUM 2: NUMARA SEÇİMİ YAPMA (1, 2, 3 vb.) ---
+            # --- DURUM 2: SAYI SEÇİMİ ---
             elif remote_jid in PENDING_SEARCHES and message_text.isdigit():
                 selected_index = int(message_text) - 1
-                user_files = PENDING_SEARCHES[remote_jid]
+                saved_data = PENDING_SEARCHES[remote_jid]
+                user_files = saved_data["files"]
+                original_user = saved_data["user"]
                 
-                # Yazılan numara listede var mı kontrol et
                 if 0 <= selected_index < len(user_files):
                     chosen_file = user_files[selected_index]
                     file_name = chosen_file['name']
                     file_link = chosen_file['webViewLink']
                     
-                    reply = f"📄 *{file_name}* seçildi.\n\n🔗 Doküman Linki:\n{file_link}"
-                    send_whatsapp_message(remote_jid, instance_name, reply)
-                    
-                    # İşlem bittiği için kullanıcının geçici hafızasını temizle
+                    reply = f"seçtiğiniz *{file_name}* kılavuzu.\n\n🔗 Doküman Linki:\n{file_link}"
+                    send_whatsapp_message(remote_jid, instance_name, reply, original_user)
                     del PENDING_SEARCHES[remote_jid]
                 else:
-                    send_whatsapp_message(remote_jid, instance_name, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan (1 ile {len(user_files)} arası) birini yazın.")
+                    send_whatsapp_message(remote_jid, instance_name, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.", original_user)
                     
     except Exception as e:
         print(f"🤖 Webhook işlem hatası: {e}")
