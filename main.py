@@ -32,7 +32,7 @@ def search_all_pdfs_in_drive(file_name_keyword):
         return []
 
 def send_whatsapp_message(remote_jid, text):
-    """Evolution API üzerinden WhatsApp'a doğrudan mesaj gönderir (İsim Hitabı Kaldırıldı)."""
+    """Evolution API üzerinden WhatsApp'a doğrudan mesaj gönderir."""
     send_url = f"{EVO_URL}/message/sendText/bosphore_ana_bot"
     headers = {"apikey": EVO_API_KEY, "Content-Type": "application/json"}
     
@@ -76,13 +76,14 @@ def webhook():
             
             # --- DURUM 1: ARAMA TETİKLENME ---
             if message_text_lower.startswith("kılavuz"):
-                search_keyword = clean_search_keyword(message_text_lower)
+                # Yeni bir arama başladığı an eski tüm bekleyen seçimleri bu grup/kişi için sıfırla
+                PENDING_SEARCHES.pop(remote_jid, None)
                 
+                search_keyword = clean_search_keyword(message_text_lower)
                 if not search_keyword:
                     return jsonify({"status": "success"}), 200
                     
                 print(f"🔍 Arama Kelimesi: {search_keyword}")
-                
                 found_files = search_all_pdfs_in_drive(search_keyword)
                 
                 if not found_files:
@@ -94,11 +95,9 @@ def webhook():
                     file_link = found_files[0]['webViewLink']
                     reply = f"İstediğiniz *{file_name}* kılavuzu bulundu! ✅\n\n🔗 Doküman Linki:\n{file_link}"
                     send_whatsapp_message(remote_jid, reply)
-                    PENDING_SEARCHES.pop(remote_jid, None)
                 else:
-                    PENDING_SEARCHES[remote_jid] = {
-                        "files": found_files
-                    }
+                    # Birden fazla sonuç varsa hafızaya al
+                    PENDING_SEARCHES[remote_jid] = {"files": found_files}
                     reply_text = f"🔍 *Birden fazla sonuç buldum!*\nLütfen istediğiniz kılavuzun numarasını yazın (Örn: *1* veya *2*):\n\n"
                     for index, file in enumerate(found_files, start=1):
                         reply_text += f"*{index}* - {file['name']}\n"
@@ -117,7 +116,8 @@ def webhook():
                     
                     reply = f"Seçtiğiniz *{file_name}* kılavuzu hazır. 📄\n\n🔗 Doküman Linki:\n{file_link}"
                     send_whatsapp_message(remote_jid, reply)
-                    del PENDING_SEARCHES[remote_jid]
+                    # Doğru seçim yapıldıktan sonra hafızayı KESİN SİL
+                    PENDING_SEARCHES.pop(remote_jid, None)
                 else:
                     send_whatsapp_message(remote_jid, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.")
                     
