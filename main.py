@@ -15,11 +15,18 @@ DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
 PENDING_SEARCHES = {}
 
+# --- ROBOT UYANDIRMA HİLESİ ---
+@app.route('/', methods=['GET'])
+def home():
+    """Uptime Robot buraya geldiğinde 200 OK alsın ve yeşile dönsün."""
+    return "Bosphore Filter Bot Aktif ve Canlı! 🟢", 200
+
 def search_all_pdfs_in_drive(file_name_keyword):
-    """Google Drive klasöründe isminde keyword geçen TÜM PDF'leri listeler."""
+    """Google Drive klasöründe ismi eşleşen TÜM dosya türlerini listeler (Filtre Kaldırıldı)."""
     try:
         drive_service = build('drive', 'v3', developerKey=DRIVE_API_KEY)
-        query = f"'{DRIVE_FOLDER_ID}' in parents and name contains '{file_name_keyword}' and mimeType = 'application/pdf' and trashed = false"
+        # DEĞİŞİKLİK: mimeType filtresi kaldırıldı, artık tüm formatları (Word, Excel vb.) arar.
+        query = f"'{DRIVE_FOLDER_ID}' in parents and name contains '{file_name_keyword}' and trashed = false"
         results = drive_service.files().list(
             q=query, 
             spaces='drive', 
@@ -76,7 +83,6 @@ def webhook():
             
             # --- DURUM 1: ARAMA TETİKLENME ---
             if message_text_lower.startswith("kılavuz"):
-                # Yeni bir arama başladığı an eski tüm bekleyen seçimleri bu grup/kişi için sıfırla
                 PENDING_SEARCHES.pop(remote_jid, None)
                 
                 search_keyword = clean_search_keyword(message_text_lower)
@@ -87,18 +93,17 @@ def webhook():
                 found_files = search_all_pdfs_in_drive(search_keyword)
                 
                 if not found_files:
-                    send_whatsapp_message(remote_jid, f"Aradığınız '{search_keyword}' kılavuzu maalesef klasörde bulunamadı. ❌")
+                    send_whatsapp_message(remote_jid, f"Aradığınız '{search_keyword}' dokümanı maalesef klasörde bulunamadı. ❌")
                     return jsonify({"status": "success"}), 200
                 
                 if len(found_files) == 1:
                     file_name = found_files[0]['name']
                     file_link = found_files[0]['webViewLink']
-                    reply = f"İstediğiniz *{file_name}* kılavuzu bulundu! ✅\n\n🔗 Doküman Linki:\n{file_link}"
+                    reply = f"İstediğiniz *{file_name}* dokümanı bulundu! ✅\n\n🔗 Doküman Linki:\n{file_link}"
                     send_whatsapp_message(remote_jid, reply)
                 else:
-                    # Birden fazla sonuç varsa hafızaya al
                     PENDING_SEARCHES[remote_jid] = {"files": found_files}
-                    reply_text = f"🔍 *Birden fazla sonuç buldum!*\nLütfen istediğiniz kılavuzun numarasını yazın (Örn: *1* veya *2*):\n\n"
+                    reply_text = f"🔍 *Birden fazla sonuç buldum!*\nLütfen istediğiniz dokümanın numarasını yazın (Örn: *1* veya *2*):\n\n"
                     for index, file in enumerate(found_files, start=1):
                         reply_text += f"*{index}* - {file['name']}\n"
                     send_whatsapp_message(remote_jid, reply_text)
@@ -114,9 +119,8 @@ def webhook():
                     file_name = chosen_file['name']
                     file_link = chosen_file['webViewLink']
                     
-                    reply = f"Seçtiğiniz *{file_name}* kılavuzu hazır. 📄\n\n🔗 Doküman Linki:\n{file_link}"
+                    reply = f"Seçtiğiniz *{file_name}* dokümanı hazır. 📄\n\n🔗 Doküman Linki:\n{file_link}"
                     send_whatsapp_message(remote_jid, reply)
-                    # Doğru seçim yapıldıktan sonra hafızayı KESİN SİL
                     PENDING_SEARCHES.pop(remote_jid, None)
                 else:
                     send_whatsapp_message(remote_jid, f"⚠️ Geçersiz numara. Lütfen listedeki rakamlardan birini yazın.")
