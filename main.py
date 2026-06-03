@@ -1,5 +1,8 @@
 import os
 import requests
+import gc
+import threading
+import time
 from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 
@@ -15,6 +18,21 @@ DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
 PENDING_SEARCHES = {}
 
+# --- BELLEK TEMİZLEME ZAMANLAYICISI (RAM KORUMASI) ---
+def auto_clear_pending_searches():
+    """Kullanıcı numara seçmeyip botu askıda bırakırsa, 10 dakikada bir hafızayı sıfırlar."""
+    global PENDING_SEARCHES
+    while True:
+        time.sleep(600)  # 10 dakikada bir çalışır
+        if PENDING_SEARCHES:
+            print("🧹 Askıda kalan aramalar temizleniyor, RAM boşaltılıyor...")
+            PENDING_SEARCHES.clear()
+            gc.collect()
+
+# Arka planda RAM temizleyiciyi başlatıyoruz
+threading.Thread(target=auto_clear_pending_searches, daemon=True).start()
+
+
 # --- ROBOT UYANDIRMA HİLESİ ---
 @app.route('/', methods=['GET'])
 def home():
@@ -25,7 +43,6 @@ def search_all_pdfs_in_drive(file_name_keyword):
     """Google Drive klasöründe ismi eşleşen TÜM dosya türlerini listeler (Filtre Kaldırıldı)."""
     try:
         drive_service = build('drive', 'v3', developerKey=DRIVE_API_KEY)
-        # DEĞİŞİKLİK: mimeType filtresi kaldırıldı, artık tüm formatları (Word, Excel vb.) arar.
         query = f"'{DRIVE_FOLDER_ID}' in parents and name contains '{file_name_keyword}' and trashed = false"
         results = drive_service.files().list(
             q=query, 
@@ -33,7 +50,10 @@ def search_all_pdfs_in_drive(file_name_keyword):
             fields='files(id, name, webViewLink)',
             pageSize=10
         ).execute()
-        return results.get('files', [])
+        
+        files = results.get('files', [])
+        drive_service.close() # Bağlantıyı kapatarak RAM'i koruyoruz
+        return files
     except Exception as e:
         print(f"Drive Arama Hatası: {e}")
         return []
@@ -50,8 +70,11 @@ def send_whatsapp_message(remote_jid, text):
         "linkPreview": True
     }
     
-    response = requests.post(send_url, json=payload, headers=headers)
-    print(f"📨 Mesaj Gönderme Durumu: {response.status_code}")
+    try:
+        response = requests.post(send_url, json=payload, headers=headers)
+        print(f"📨 Mesaj Gönderme Durumu: {response.status_code}")
+    except Exception as e:
+        print(f"Mesaj gönderme hatası: {e}")
 
 def clean_search_keyword(text):
     """Kullanıcının mesajındaki gereksiz arama kelimelerini temizler."""
@@ -94,6 +117,7 @@ def webhook():
                 
                 if not found_files:
                     send_whatsapp_message(remote_jid, f"Aradığınız '{search_keyword}' dokümanı maalesef klasörde bulunamadı. ❌")
+                    gc.collect()
                     return jsonify({"status": "success"}), 200
                 
                 if len(found_files) == 1:
@@ -127,6 +151,10 @@ def webhook():
                     
     except Exception as e:
         print(f"🤖 Webhook işlem hatası: {e}")
+        
+    finally:
+        # 🗑️ HER İSTEK SONUNDA RAM ZORLA BOŞALTILIR
+        gc.collect()
         
     return jsonify({"status": "success"}), 200
 
