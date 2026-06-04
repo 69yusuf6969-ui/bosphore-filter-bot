@@ -18,19 +18,17 @@ DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
 PENDING_SEARCHES = {}
 
-# --- BELLEK TEMİZLEME ZAMANLAYICISI (RAM KORUMASI) ---
-def auto_clear_pending_searches():
-    """Kullanıcı numara seçmeyip botu askıda bırakırsa, 10 dakikada bir hafızayı sıfırlar."""
-    global PENDING_SEARCHES
-    while True:
-        time.sleep(600)  # 10 dakikada bir çalışır
-        if PENDING_SEARCHES:
-            print("🧹 Askıda kalan aramalar temizleniyor, RAM boşaltılıyor...")
-            PENDING_SEARCHES.clear()
-            gc.collect()
+# --- 10 DAKİKADA BİR OTOMATİK RESET HİLESİ (RAM KORUMASI) ---
+def auto_restart_bot():
+    """Botun şişmesini engellemek için her 10 dakikada bir sistemi içeriden kapatır.
+    Uptime Robot anında algılayıp botu sıfır RAM ile yeniden ayağa kaldırır."""
+    print("⏰ 10 dakikalık süre doldu. RAM'i sıfırlamak için bot kapatılıyor...")
+    time.sleep(600)  # 10 dakika (600 saniye) bekler
+    print("🔄 Bot şu an kapatılıyor, Uptime Robot birazdan sistemi yeniden başlatacak.")
+    os._exit(0)  # Sistemi tamamen sonlandırır
 
-# Arka planda RAM temizleyiciyi başlatıyoruz
-threading.Thread(target=auto_clear_pending_searches, daemon=True).start()
+# Arka planda geri sayımı başlatıyoruz
+threading.Thread(target=auto_restart_bot, daemon=True).start()
 
 
 # --- ROBOT UYANDIRMA HİLESİ ---
@@ -52,7 +50,7 @@ def search_all_pdfs_in_drive(file_name_keyword):
         ).execute()
         
         files = results.get('files', [])
-        drive_service.close() # Bağlantıyı kapatarak RAM'i koruyoruz
+        drive_service.close()
         return files
     except Exception as e:
         print(f"Drive Arama Hatası: {e}")
@@ -153,7 +151,6 @@ def webhook():
         print(f"🤖 Webhook işlem hatası: {e}")
         
     finally:
-        # 🗑️ HER İSTEK SONUNDA RAM ZORLA BOŞALTILIR
         gc.collect()
         
     return jsonify({"status": "success"}), 200
