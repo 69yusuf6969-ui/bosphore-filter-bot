@@ -3,7 +3,6 @@ import requests
 import gc
 import threading
 import time
-import signal
 from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 
@@ -19,18 +18,24 @@ DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
 PENDING_SEARCHES = {}
 
-def graceful_reload():
-    """Render'ı kızdırmadan, arka plandaki Gunicorn işçisini kibarca sıfırlar."""
-    time.sleep(1)
-    print("♻️ Uptime Robot tetikledi: RAM temizliği için işçi yenileniyor...")
-    os.kill(os.getpid(), signal.SIGHUP)
+def force_ram_clean():
+    """Gruptan arama yapıldıkça biriken çöp hafızayı zorla temizler."""
+    while True:
+        time.sleep(300) # Her 5 dakikada bir çalışır
+        print("🧹 Periyodik RAM temizliği yapılıyor...")
+        PENDING_SEARCHES.clear()
+        gc.collect()
 
-# --- ROBOT UYANDIRMA VE HAFIZA SIFIRLAMA ---
+# Arka planda RAM temizleme motorunu başlatıyoruz
+threading.Thread(target=force_ram_clean, daemon=True).start()
+
+
+# --- ROBOT UYANDIRMA VE CANLI TUTMA ---
 @app.route('/', methods=['GET'])
 def home():
-    """Uptime Robot her 5 dakikada bir buraya uğradığında, 
-    bot hem 200 OK verir hem de arka planda RAM'ini sıfırlar."""
-    threading.Thread(target=graceful_reload).start()
+    """Uptime Robot her 5 dakikada bir buraya uğradığında 200 OK alır,
+    botu uyanık tutar ve RAM'i temizler."""
+    gc.collect()
     return "Bosphore Filter Bot Aktif ve Canlı! 🟢", 200
 
 def search_all_pdfs_in_drive(file_name_keyword):
@@ -152,4 +157,6 @@ def webhook():
     return jsonify({"status": "success"}), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    # Render portu otomatik ayarlasın diye 5000 yerine çevre değişkenini dinliyoruz
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
