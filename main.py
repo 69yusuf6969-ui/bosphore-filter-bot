@@ -1,6 +1,9 @@
 import os
 import requests
 import gc
+import threading
+import time
+import signal
 from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 
@@ -16,10 +19,18 @@ DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
 PENDING_SEARCHES = {}
 
-# --- ROBOT UYANDIRMA HİLESİ ---
+def graceful_reload():
+    """Render'ı kızdırmadan, arka plandaki Gunicorn işçisini kibarca sıfırlar."""
+    time.sleep(1)
+    print("♻️ Uptime Robot tetikledi: RAM temizliği için işçi yenileniyor...")
+    os.kill(os.getpid(), signal.SIGHUP)
+
+# --- ROBOT UYANDIRMA VE HAFIZA SIFIRLAMA ---
 @app.route('/', methods=['GET'])
 def home():
-    """Uptime Robot buraya geldiğinde 200 OK alsın ve yeşile dönsün."""
+    """Uptime Robot her 5 dakikada bir buraya uğradığında, 
+    bot hem 200 OK verir hem de arka planda RAM'ini sıfırlar."""
+    threading.Thread(target=graceful_reload).start()
     return "Bosphore Filter Bot Aktif ve Canlı! 🟢", 200
 
 def search_all_pdfs_in_drive(file_name_keyword):
