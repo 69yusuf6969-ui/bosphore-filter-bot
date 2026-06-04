@@ -1,8 +1,6 @@
 import os
 import requests
 import gc
-import threading
-import time
 from flask import Flask, request, jsonify
 from googleapiclient.discovery import build
 
@@ -18,19 +16,6 @@ DRIVE_FOLDER_ID = "1p5L-2bCVYkOdNgFWi6XF49yKdwacDBhI"
 
 PENDING_SEARCHES = {}
 
-# --- 10 DAKİKADA BİR OTOMATİK RESET HİLESİ (RAM KORUMASI) ---
-def auto_restart_bot():
-    """Botun şişmesini engellemek için her 10 dakikada bir sistemi içeriden kapatır.
-    Uptime Robot anında algılayıp botu sıfır RAM ile yeniden ayağa kaldırır."""
-    print("⏰ 10 dakikalık süre doldu. RAM'i sıfırlamak için bot kapatılıyor...")
-    time.sleep(600)  # 10 dakika (600 saniye) bekler
-    print("🔄 Bot şu an kapatılıyor, Uptime Robot birazdan sistemi yeniden başlatacak.")
-    os._exit(0)  # Sistemi tamamen sonlandırır
-
-# Arka planda geri sayımı başlatıyoruz
-threading.Thread(target=auto_restart_bot, daemon=True).start()
-
-
 # --- ROBOT UYANDIRMA HİLESİ ---
 @app.route('/', methods=['GET'])
 def home():
@@ -38,7 +23,7 @@ def home():
     return "Bosphore Filter Bot Aktif ve Canlı! 🟢", 200
 
 def search_all_pdfs_in_drive(file_name_keyword):
-    """Google Drive klasöründe ismi eşleşen TÜM dosya türlerini listeler (Filtre Kaldırıldı)."""
+    """Google Drive klasöründe ismi eşleşen TÜM dosya türlerini listeler."""
     try:
         drive_service = build('drive', 'v3', developerKey=DRIVE_API_KEY)
         query = f"'{DRIVE_FOLDER_ID}' in parents and name contains '{file_name_keyword}' and trashed = false"
